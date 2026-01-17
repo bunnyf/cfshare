@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,6 +20,12 @@ import (
 	"cfshare/internal/tunnel"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "__server__" {
 		runServerProcess()
@@ -27,19 +33,22 @@ func main() {
 	}
 
 	var (
-		publicMode bool
-		password   string
-		showHelp   bool
-		forceStop  bool
-		tunnelName string
-		publicURL  string
-		port       int
+		publicMode  bool
+		password    string
+		showHelp    bool
+		showVersion bool
+		forceStop   bool
+		tunnelName  string
+		publicURL   string
+		port        int
 	)
 
 	flag.BoolVar(&publicMode, "public", false, "公开分享（无需认证）")
 	flag.StringVar(&password, "pass", "", "指定口令（默认随机生成）")
 	flag.BoolVar(&showHelp, "help", false, "显示帮助")
 	flag.BoolVar(&showHelp, "h", false, "显示帮助")
+	flag.BoolVar(&showVersion, "version", false, "显示版本")
+	flag.BoolVar(&showVersion, "v", false, "显示版本")
 	flag.BoolVar(&forceStop, "force", false, "强制停止")
 	flag.StringVar(&tunnelName, "tunnel", config.TunnelName, "Cloudflare Tunnel 名称")
 	flag.StringVar(&publicURL, "url", "", "公开访问 URL（如 https://share.example.com）")
@@ -50,6 +59,11 @@ func main() {
 
 	if showHelp {
 		printUsage()
+		return
+	}
+
+	if showVersion {
+		fmt.Printf("cfshare %s (commit: %s, built: %s)\n", version, commit, date)
 		return
 	}
 
