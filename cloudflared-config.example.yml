@@ -1,0 +1,17 @@
+# Cloudflare Tunnel 配置示例
+# 将此文件复制到 ~/.cloudflared/config.yml
+# 并修改相应的值
+
+# Tunnel UUID
+tunnel: cfshare
+
+# 凭证文件路径
+credentials-file: /Users/YOUR_USERNAME/.cloudflared/TUNNEL_ID.json
+
+# 入口规则
+ingress:
+  - hostname: share.yourdomain.com
+    service: http://localhost:8787
+  
+  # 默认规则（必须有）
+  - service: http_status:404
