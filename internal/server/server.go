@@ -20,37 +20,102 @@ import (
 )
 
 type Server struct {
+	// 多路径支持
+	items   []state.ShareItem
+	itemMap map[string]*state.ShareItem // 名称->项映射
+	isMulti bool
+
+	// 单文件兼容
 	sharePath string
 	shareType state.ShareType
-	state     *state.State
-	stateMu   sync.Mutex
-	srv       *http.Server
+
+	state   *state.State
+	stateMu sync.Mutex
+	srv     *http.Server
 }
 
-func NewServer(sharePath string, st *state.State) (*Server, error) {
-	absPath, err := filepath.Abs(sharePath)
+func NewServer(paths []string, st *state.State) (*Server, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no paths provided")
+	}
+
+	var items []state.ShareItem
+
+	for _, p := range paths {
+		absPath, err := filepath.Abs(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid path %s: %w", p, err)
+		}
+
+		info, err := os.Stat(absPath)
+		if err != nil {
+			return nil, fmt.Errorf("cannot access %s: %w", p, err)
+		}
+
+		item := state.ShareItem{
+			Path: absPath,
+			Name: filepath.Base(absPath),
+		}
+
+		if info.IsDir() {
+			item.ShareType = state.TypeDir
+			item.Size = 0
+		} else {
+			item.ShareType = state.TypeFile
+			item.Size = info.Size()
+		}
+
+		items = append(items, item)
+	}
+
+	// 检测名称冲突
+	itemMap, err := buildItemMap(items)
 	if err != nil {
-		return nil, fmt.Errorf("get absolute path: %w", err)
+		return nil, err
 	}
 
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return nil, fmt.Errorf("stat path: %w", err)
+	// 单路径: 保持向后兼容
+	if len(items) == 1 {
+		st.Items = items
+		st.Path = items[0].Path
+		st.ShareType = items[0].ShareType
+		st.IsMulti = false
+
+		return &Server{
+			sharePath: items[0].Path,
+			shareType: items[0].ShareType,
+			items:     items,
+			itemMap:   itemMap,
+			isMulti:   false,
+			state:     st,
+		}, nil
 	}
 
-	shareType := state.TypeFile
-	if info.IsDir() {
-		shareType = state.TypeDir
-	}
-
-	st.Path = absPath
-	st.ShareType = shareType
+	// 多路径
+	st.Items = items
+	st.IsMulti = true
 
 	return &Server{
-		sharePath: absPath,
-		shareType: shareType,
-		state:     st,
+		items:   items,
+		itemMap: itemMap,
+		isMulti: true,
+		state:   st,
 	}, nil
+}
+
+// buildItemMap 构建名称到项的映射，检测名称冲突
+func buildItemMap(items []state.ShareItem) (map[string]*state.ShareItem, error) {
+	result := make(map[string]*state.ShareItem)
+
+	for i := range items {
+		name := items[i].Name
+		if _, exists := result[name]; exists {
+			return nil, fmt.Errorf("名称冲突: 多个分享项具有相同名称 '%s'，请重命名后再试", name)
+		}
+		result[name] = &items[i]
+	}
+
+	return result, nil
 }
 
 func (s *Server) Start(port int, username, password string) error {
@@ -83,11 +148,239 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 
-	if s.shareType == state.TypeFile {
-		s.serveFile(w, r)
-	} else {
-		s.serveDir(w, r)
+	if !s.isMulti {
+		// 向后兼容: 单路径模式
+		if s.shareType == state.TypeFile {
+			s.serveFile(w, r)
+		} else {
+			s.serveDir(w, r)
+		}
+		return
 	}
+
+	// 多文件模式
+	s.handleMultiShare(w, r)
+}
+
+// handleMultiShare 处理多文件分享请求
+func (s *Server) handleMultiShare(w http.ResponseWriter, r *http.Request) {
+	reqPath := filepath.Clean(r.URL.Path)
+
+	// 根路径: 显示虚拟目录列表
+	if reqPath == "/" || reqPath == "." || reqPath == "" {
+		s.listVirtualRoot(w, r)
+		return
+	}
+
+	// 解析第一级路径名
+	trimmedPath := strings.TrimPrefix(reqPath, "/")
+	parts := strings.SplitN(trimmedPath, "/", 2)
+	itemName := parts[0]
+	subPath := ""
+	if len(parts) > 1 {
+		subPath = parts[1]
+	}
+
+	// 查找分享项
+	item, ok := s.itemMap[itemName]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	// 根据分享项类型处理
+	if item.ShareType == state.TypeFile {
+		// 文件: 直接下载 (忽略 subPath)
+		if subPath != "" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, item.Name))
+		http.ServeFile(w, r, item.Path)
+	} else {
+		// 目录: 使用基于项的目录浏览
+		s.serveDirWithBase(w, r, item.Path, "/"+itemName, subPath)
+	}
+}
+
+// listVirtualRoot 列出虚拟根目录（所有分享项）
+func (s *Server) listVirtualRoot(w http.ResponseWriter, r *http.Request) {
+	var files []FileInfo
+
+	for _, item := range s.items {
+		fi := FileInfo{
+			Name:  item.Name,
+			Size:  item.Size,
+			IsDir: item.ShareType == state.TypeDir,
+			Path:  "/" + item.Name,
+		}
+		if fi.IsDir {
+			fi.Path += "/"
+		}
+		// 获取真实的修改时间
+		if info, err := os.Stat(item.Path); err == nil {
+			fi.ModTime = info.ModTime()
+		} else {
+			fi.ModTime = time.Now()
+		}
+		files = append(files, fi)
+	}
+
+	// 排序: 目录在前，文件在后，按名称排序
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].IsDir != files[j].IsDir {
+			return files[i].IsDir
+		}
+		return files[i].Name < files[j].Name
+	})
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	tmpl := template.Must(template.New("dir").Funcs(template.FuncMap{
+		"formatSize": formatSize,
+		"formatTime": func(t time.Time) string { return t.Format("2006-01-02 15:04") },
+	}).Parse(dirTemplate))
+
+	data := struct {
+		Path   string
+		Files  []FileInfo
+		Parent string
+	}{
+		Path:   "/",
+		Files:  files,
+		Parent: "",
+	}
+
+	tmpl.Execute(w, data)
+}
+
+// serveDirWithBase 处理多文件模式下的目录浏览
+func (s *Server) serveDirWithBase(w http.ResponseWriter, r *http.Request, basePath, urlPrefix, subPath string) {
+	// 清理子路径
+	cleanSub := filepath.Clean(subPath)
+	if cleanSub == "." {
+		cleanSub = ""
+	}
+	if strings.HasPrefix(cleanSub, "..") {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// 解析 basePath 的真实路径（处理 /tmp -> /private/tmp 等情况）
+	realBasePath, err := filepath.EvalSymlinks(basePath)
+	if err != nil {
+		realBasePath = basePath
+	}
+
+	fullPath := realBasePath
+	if cleanSub != "" {
+		fullPath = filepath.Join(realBasePath, cleanSub)
+	}
+
+	// 防止路径遍历
+	if !strings.HasPrefix(fullPath, realBasePath) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// 检查符号链接是否指向 basePath 外部
+	realFullPath, err := filepath.EvalSymlinks(fullPath)
+	if err == nil && !strings.HasPrefix(realFullPath, realBasePath) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+		} else {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if info.IsDir() {
+		s.listDirectoryWithBase(w, r, fullPath, urlPrefix, subPath)
+	} else {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(fullPath)))
+		http.ServeFile(w, r, fullPath)
+	}
+}
+
+// listDirectoryWithBase 列出目录内容（多文件模式）
+func (s *Server) listDirectoryWithBase(w http.ResponseWriter, r *http.Request, fullPath, urlPrefix, subPath string) {
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	var files []FileInfo
+	currentPath := urlPrefix
+	if subPath != "" {
+		currentPath = urlPrefix + "/" + subPath
+	}
+
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		entryPath := currentPath + "/" + entry.Name()
+		if entry.IsDir() {
+			entryPath += "/"
+		}
+
+		files = append(files, FileInfo{
+			Name:    entry.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			IsDir:   entry.IsDir(),
+			Path:    entryPath,
+		})
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].IsDir != files[j].IsDir {
+			return files[i].IsDir
+		}
+		return files[i].Name < files[j].Name
+	})
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	tmpl := template.Must(template.New("dir").Funcs(template.FuncMap{
+		"formatSize": formatSize,
+		"formatTime": func(t time.Time) string { return t.Format("2006-01-02 15:04") },
+	}).Parse(dirTemplate))
+
+	// 计算父目录
+	parent := "/"
+	if subPath != "" {
+		parent = urlPrefix + "/" + filepath.Dir(subPath)
+		if parent == urlPrefix+"/." {
+			parent = urlPrefix
+		}
+	}
+
+	displayPath := currentPath
+	if !strings.HasSuffix(displayPath, "/") {
+		displayPath += "/"
+	}
+
+	data := struct {
+		Path   string
+		Files  []FileInfo
+		Parent string
+	}{
+		Path:   displayPath,
+		Files:  files,
+		Parent: parent,
+	}
+
+	tmpl.Execute(w, data)
 }
 
 func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {

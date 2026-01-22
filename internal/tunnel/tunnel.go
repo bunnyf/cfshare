@@ -34,7 +34,8 @@ func (m *Manager) Start() (int, error) {
 		return pid, nil
 	}
 
-	cmd := exec.Command(cloudflaredPath, "tunnel", "run", m.tunnelName)
+	// 使用 http2 协议，避免 QUIC 在某些网络环境下被阻止
+	cmd := exec.Command(cloudflaredPath, "tunnel", "--protocol", "http2", "run", m.tunnelName)
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
