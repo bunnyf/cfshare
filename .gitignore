@@ -11,3 +11,17 @@ config.local.yml
 
 # Archive files
 *.tar.gz
+
+# AI tools
+.claude/
+.codex/
+CLAUDE.md
+CODEX.md
+
+
+# Mac temp files
+._*
+
+# Temp files
+*-tmp-*
+

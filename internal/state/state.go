@@ -206,13 +206,14 @@ Port:       %d
 Started:    %s
 `, s.runningStatus(), s.ServerPID, s.TunnelPID, s.Port, s.StartTime.Format("2006-01-02 15:04:05"))
 
-	if s.RequestCount > 0 {
+	requestCount, lastAccess, _ := LoadStats()
+	if requestCount > 0 {
 		status += fmt.Sprintf(`
 访问统计
 ────────────────────────────────────────
 Requests:   %d
 Last Access: %s
-`, s.RequestCount, s.LastAccess.Format("2006-01-02 15:04:05"))
+`, requestCount, lastAccess.Format("2006-01-02 15:04:05"))
 	}
 
 	return status
@@ -257,26 +258,64 @@ Password: %s
 	return output
 }
 
-// UpdateAccessStats 只更新访问统计（不覆盖其他字段）
+
+// UpdateAccessStats 只更新访问统计（使用文件锁避免竞态）
 func UpdateAccessStats(record AccessRecord) error {
-	// 加载现有状态
-	existing, err := Load()
+	statsPath := config.GetConfigDir() + "/stats.json"
+	
+	// 打开或创建 stats 文件并加锁
+	f, err := os.OpenFile(statsPath, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return err
 	}
-	if existing == nil {
-		return nil // 没有状态文件，跳过
+	defer f.Close()
+	
+	// 加文件锁
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
 	}
-
-	// 只更新统计字段
-	existing.mu.Lock()
-	existing.RequestCount++
-	existing.LastAccess = record.Time
-	existing.RecentAccess = append(existing.RecentAccess, record)
-	if len(existing.RecentAccess) > 10 {
-		existing.RecentAccess = existing.RecentAccess[len(existing.RecentAccess)-10:]
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	
+	// 读取现有统计
+	var stats struct {
+		RequestCount int            `json:"request_count"`
+		LastAccess   time.Time      `json:"last_access,omitempty"`
+		RecentAccess []AccessRecord `json:"recent_access,omitempty"`
 	}
-	existing.mu.Unlock()
-
-	return existing.Save()
+	
+	data, _ := os.ReadFile(statsPath)
+	json.Unmarshal(data, &stats)
+	
+	// 更新统计
+	stats.RequestCount++
+	stats.LastAccess = record.Time
+	stats.RecentAccess = append(stats.RecentAccess, record)
+	if len(stats.RecentAccess) > 10 {
+		stats.RecentAccess = stats.RecentAccess[len(stats.RecentAccess)-10:]
+	}
+	
+	// 写回
+	newData, _ := json.MarshalIndent(stats, "", "  ")
+	f.Truncate(0)
+	f.Seek(0, 0)
+	f.Write(newData)
+	
+	return nil
 }
+
+// LoadStats 加载访问统计
+func LoadStats() (requestCount int, lastAccess time.Time, recentAccess []AccessRecord) {
+	statsPath := config.GetConfigDir() + "/stats.json"
+	data, err := os.ReadFile(statsPath)
+	if err != nil {
+		return
+	}
+	var stats struct {
+		RequestCount int            `json:"request_count"`
+		LastAccess   time.Time      `json:"last_access,omitempty"`
+		RecentAccess []AccessRecord `json:"recent_access,omitempty"`
+	}
+	json.Unmarshal(data, &stats)
+	return stats.RequestCount, stats.LastAccess, stats.RecentAccess
+}
+

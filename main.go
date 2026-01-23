@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -609,8 +610,9 @@ func startServerProcess(paths []string, port int, username, password string) (in
 		return 0, fmt.Errorf("get executable: %w", err)
 	}
 
-	// 使用 base64 编码传递多路径 (用 | 分隔)
-	pathsArg := base64.StdEncoding.EncodeToString([]byte(strings.Join(paths, "|")))
+	// 使用 JSON + base64 编码传递多路径
+	pathsJSON, _ := json.Marshal(paths)
+	pathsArg := base64.StdEncoding.EncodeToString(pathsJSON)
 	args := []string{"__server__", pathsArg, strconv.Itoa(port), username, password}
 	cmd := exec.Command(exe, args...)
 
@@ -647,14 +649,15 @@ func runServerProcess() {
 		os.Exit(1)
 	}
 
-	// 解析 base64 编码的多路径 (用 | 分隔)
+	// 解析 JSON + base64 编码的多路径
 	pathsArg := os.Args[2]
 	decoded, err := base64.StdEncoding.DecodeString(pathsArg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "decode paths: %v\n", err)
 		os.Exit(1)
 	}
-	paths := strings.Split(string(decoded), "|")
+	var paths []string
+	json.Unmarshal(decoded, &paths)
 	port, _ := strconv.Atoi(os.Args[3])
 	username := ""
 	password := ""

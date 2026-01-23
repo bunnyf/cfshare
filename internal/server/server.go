@@ -164,7 +164,7 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 // handleMultiShare 处理多文件分享请求
 func (s *Server) handleMultiShare(w http.ResponseWriter, r *http.Request) {
-	reqPath := filepath.Clean(r.URL.Path)
+	reqPath := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
 
 	// 根路径: 显示虚拟目录列表
 	if reqPath == "/" || reqPath == "." || reqPath == "" {
@@ -397,7 +397,7 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveDir(w http.ResponseWriter, r *http.Request) {
-	reqPath := filepath.Clean(r.URL.Path)
+	reqPath := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
 	if strings.HasPrefix(reqPath, "..") {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return

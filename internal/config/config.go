@@ -41,3 +41,7 @@ func GetTunnelPidFilePath() string {
 func EnsureConfigDir() error {
 	return os.MkdirAll(GetConfigDir(), 0700)
 }
+
+func GetStatsPath() string {
+	return filepath.Join(GetConfigDir(), "stats.json")
+}

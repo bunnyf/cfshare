@@ -57,6 +57,8 @@ func (m *Manager) Start() (int, error) {
 
 	pid := cmd.Process.Pid
 	if err := m.savePID(pid); err != nil {
+		cmd.Process.Kill()
+		logFile.Close()
 		return pid, fmt.Errorf("save tunnel pid: %w", err)
 	}
 
