@@ -1,5 +1,9 @@
 # cfshare
 
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/bunnyf/cfshare/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)]()
+
 [English](#english) | [中文](#中文)
 
 ---
@@ -11,6 +15,7 @@ Share local files or directories via Cloudflare Tunnel with a single command. Ge
 ### Features
 
 - **One-Command Sharing** - Share files or directories with a single command
+- **Cross-Platform** - Supports macOS, Linux, and Windows
 - **Secure by Default** - Auto-generated access password (Basic Auth)
 - **Global CDN** - Accelerated access via Cloudflare's edge network
 - **Optional Public Mode** - Support `--public` for anonymous sharing
@@ -81,6 +86,11 @@ brew install go cloudflared
 # Linux (Debian/Ubuntu)
 # Install Go: https://go.dev/dl/
 # Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/
+
+# Windows
+# Install Go: https://go.dev/dl/
+# Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/
+# Or use: winget install Cloudflare.cloudflared
 ```
 
 #### Build & Install
@@ -149,7 +159,7 @@ make install  # Installs to ~/bin
 
 ### System Requirements
 
-- macOS / Linux
+- macOS / Linux / Windows
 - Go 1.21+ (for building)
 - cloudflared
 - Domain hosted on Cloudflare
@@ -157,7 +167,6 @@ make install  # Installs to ~/bin
 ### Known Limitations
 
 - Only one active share at a time
-- Windows not supported (uses Unix process signals and process groups)
 - Large file transfers limited by Cloudflare free plan (100MB/request)
 
 ### License
@@ -173,6 +182,7 @@ GPL-3.0
 ### 特性
 
 - **一键分享** - 单命令分享文件或目录
+- **跨平台** - 支持 macOS、Linux 和 Windows
 - **默认安全** - 自动生成访问口令（Basic Auth）
 - **全球加速** - 通过 Cloudflare 边缘网络提供访问
 - **可选公开** - 支持 `--public` 匿名分享
@@ -243,6 +253,11 @@ brew install go cloudflared
 # Linux (Debian/Ubuntu)
 # 安装 Go: https://go.dev/dl/
 # 安装 cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/
+
+# Windows
+# 安装 Go: https://go.dev/dl/
+# 安装 cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/
+# 或使用: winget install Cloudflare.cloudflared
 ```
 
 #### 编译安装
@@ -363,7 +378,7 @@ rm -rf ~/.cfshare/
 
 ### 系统要求
 
-- macOS / Linux
+- macOS / Linux / Windows
 - Go 1.21+ (编译时需要)
 - cloudflared (Cloudflare Tunnel 客户端)
 - 托管在 Cloudflare 的域名
@@ -371,7 +386,6 @@ rm -rf ~/.cfshare/
 ### 已知限制
 
 - 同时只能有一个活动分享
-- 不支持 Windows（使用了 Unix 进程信号和进程组管理）
 - 大文件传输受 Cloudflare 免费计划限制 (100MB/请求)
 
 ### 许可证
