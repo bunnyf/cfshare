@@ -1,6 +1,6 @@
 # cfshare
 
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/bunnyf/cfshare/releases)
+[![Version](https://img.shields.io/badge/version-1.2.1-blue.svg)](https://github.com/bunnyf/cfshare/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)]()
 
