@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"cfshare/internal/config"
@@ -37,9 +36,7 @@ func (m *Manager) Start() (int, error) {
 	// 使用 http2 协议，避免 QUIC 在某些网络环境下被阻止
 	cmd := exec.Command(cloudflaredPath, "tunnel", "--protocol", "http2", "run", m.tunnelName)
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	setProcAttr(cmd)
 
 	logPath := config.GetConfigDir() + "/tunnel.log"
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -83,7 +80,7 @@ func (m *Manager) Stop() error {
 		return nil
 	}
 
-	if err := process.Signal(syscall.SIGTERM); err != nil {
+	if err := signalTerm(process); err != nil {
 		m.removePIDFile()
 		return nil
 	}
@@ -97,7 +94,7 @@ func (m *Manager) Stop() error {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		process.Signal(syscall.SIGKILL)
+		signalKill(process)
 	}
 
 	m.removePIDFile()
@@ -117,7 +114,7 @@ func (m *Manager) ForceStop() error {
 		return nil
 	}
 
-	process.Signal(syscall.SIGKILL)
+	signalKill(process)
 	m.removePIDFile()
 	return nil
 }
@@ -154,12 +151,7 @@ func (m *Manager) removePIDFile() {
 }
 
 func (m *Manager) isProcessRunning(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
+	return isProcessRunning(pid)
 }
 
 func (m *Manager) GetPublicURL() (string, error) {

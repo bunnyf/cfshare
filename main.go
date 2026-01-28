@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"cfshare/internal/auth"
@@ -119,7 +118,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Print(`cfshare - Share files via Cloudflare Tunnel
+	fmt.Println(`cfshare - Share files via Cloudflare Tunnel
 
 Usage:
     cfshare <path>...           Share file(s)/directory (password protected)
@@ -145,11 +144,16 @@ Options:
     -v, --version   Show version
 
 First-time setup requires Cloudflare Tunnel configuration:
-    1. Install cloudflared: brew install cloudflared
+    1. Install cloudflared:
+       - macOS: brew install cloudflared
+       - Windows: winget install Cloudflare.cloudflared
+       - Linux: See https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation
     2. Login: cloudflared tunnel login
     3. Create tunnel: cloudflared tunnel create cfshare
     4. Configure DNS: cloudflared tunnel route dns cfshare share.example.com
-    5. Create ~/.cloudflared/config.yml
+    5. Create config file:
+       - macOS/Linux: ~/.cloudflared/config.yml
+       - Windows: C:\Users\<username>\.cloudflared\config.yml
 
 Examples:
     cfshare ~/Documents/report.pdf
@@ -157,12 +161,11 @@ Examples:
     cfshare . --pass mypassword
     cfshare file1.pdf file2.txt dir1/    # Multi-file share
     cfshare add newfile.txt              # Dynamically add file
-    cfshare rm oldfile.txt               # Dynamically remove file
-`)
+    cfshare rm oldfile.txt               # Dynamically remove file`)
 }
 
 func printUsageChinese() {
-	fmt.Print(`cfshare - 通过 Cloudflare Tunnel 分享文件
+	fmt.Println(`cfshare - 通过 Cloudflare Tunnel 分享文件
 
 用法:
     cfshare <path>...           分享一个或多个文件/目录（需要口令）
@@ -188,11 +191,16 @@ func printUsageChinese() {
     -v, --version   显示版本
 
 首次使用需要配置 Cloudflare Tunnel:
-    1. 安装 cloudflared: brew install cloudflared
+    1. 安装 cloudflared:
+       - macOS: brew install cloudflared
+       - Windows: winget install Cloudflare.cloudflared
+       - Linux: 参考 https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation
     2. 登录: cloudflared tunnel login
     3. 创建 tunnel: cloudflared tunnel create cfshare
     4. 配置 DNS: cloudflared tunnel route dns cfshare share.example.com
-    5. 创建 ~/.cloudflared/config.yml
+    5. 创建配置文件:
+       - macOS/Linux: ~/.cloudflared/config.yml
+       - Windows: C:\Users\<username>\.cloudflared\config.yml
 
 示例:
     cfshare ~/Documents/report.pdf
@@ -200,8 +208,7 @@ func printUsageChinese() {
     cfshare . --pass mypassword
     cfshare file1.pdf file2.txt dir1/    # 多文件分享
     cfshare add newfile.txt              # 动态添加文件
-    cfshare rm oldfile.txt               # 动态移除文件
-`)
+    cfshare rm oldfile.txt               # 动态移除文件`)
 }
 
 func cmdStatus() {
@@ -241,31 +248,6 @@ func cmdStop(force bool) {
 	os.Remove(config.GetPidFilePath())
 
 	fmt.Println("✅ 分享已停止")
-}
-
-func stopProcess(pid int, force bool) {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-
-	if force {
-		process.Signal(syscall.SIGKILL)
-	} else {
-		process.Signal(syscall.SIGTERM)
-
-		done := make(chan struct{})
-		go func() {
-			process.Wait()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			process.Signal(syscall.SIGKILL)
-		}
-	}
 }
 
 func cmdSetup(tunnelName string) {
@@ -616,9 +598,7 @@ func startServerProcess(paths []string, port int, username, password string) (in
 	args := []string{"__server__", pathsArg, strconv.Itoa(port), username, password}
 	cmd := exec.Command(exe, args...)
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	setProcAttr(cmd)
 
 	logPath := config.GetConfigDir() + "/server.log"
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -678,7 +658,7 @@ func runServerProcess() {
 	}
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(sigChan, getSignals()...)
 
 	go func() {
 		<-sigChan

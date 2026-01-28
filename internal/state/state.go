@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"cfshare/internal/config"
@@ -158,13 +157,7 @@ func (s *State) IsRunning() bool {
 		return false
 	}
 
-	process, err := os.FindProcess(s.ServerPID)
-	if err != nil {
-		return false
-	}
-
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
+	return isProcessAlive(s.ServerPID)
 }
 
 func (s *State) FormatStatus() string {
@@ -271,10 +264,10 @@ func UpdateAccessStats(record AccessRecord) error {
 	defer f.Close()
 	
 	// 加文件锁
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFile(f); err != nil {
 		return err
 	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	defer unlockFile(f)
 	
 	// 读取现有统计
 	var stats struct {
