@@ -95,12 +95,33 @@ brew install go cloudflared
 
 #### Build & Install
 
+**macOS / Linux:**
+
 ```bash
 git clone https://github.com/bunnyf/cfshare.git
 cd cfshare
 make build
 make install  # Installs to ~/bin
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/bunnyf/cfshare.git
+cd cfshare
+go build -o cfshare.exe .
+
+# Move to a directory in your PATH, e.g.:
+mkdir -Force "$env:USERPROFILE\bin"
+Move-Item cfshare.exe "$env:USERPROFILE\bin\"
+
+# Add to PATH (run once):
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\bin", "User")
+```
+
+**Windows (Pre-built Binary):**
+
+Download from [Releases](https://github.com/bunnyf/cfshare/releases) and extract `cfshare.exe` to a directory in your PATH.
 
 ### Cloudflare Tunnel Setup
 
@@ -262,12 +283,33 @@ brew install go cloudflared
 
 #### 编译安装
 
+**macOS / Linux:**
+
 ```bash
 git clone https://github.com/bunnyf/cfshare.git
 cd cfshare
 make build
 make install  # 安装到 ~/bin
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/bunnyf/cfshare.git
+cd cfshare
+go build -o cfshare.exe .
+
+# 移动到 PATH 目录，例如：
+mkdir -Force "$env:USERPROFILE\bin"
+Move-Item cfshare.exe "$env:USERPROFILE\bin\"
+
+# 添加到 PATH（只需执行一次）：
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\bin", "User")
+```
+
+**Windows (预编译二进制):**
+
+从 [Releases](https://github.com/bunnyf/cfshare/releases) 下载并解压 `cfshare.exe` 到 PATH 目录。
 
 ### 配置 Cloudflare Tunnel
 
