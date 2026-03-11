@@ -146,7 +146,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
+	// Cache-Control is set per response type:
+	// - File downloads: allow Cloudflare CDN caching (public, max-age=3600)
+	// - Directory listings: no-store (dynamic HTML)
 
 	if !s.isMulti {
 		// 向后兼容: 单路径模式
@@ -195,6 +197,7 @@ func (s *Server) handleMultiShare(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Cache-Control", "public, max-age=3600")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, item.Name))
 		http.ServeFile(w, r, item.Path)
 	} else {
@@ -234,6 +237,7 @@ func (s *Server) listVirtualRoot(w http.ResponseWriter, r *http.Request) {
 		return files[i].Name < files[j].Name
 	})
 
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	tmpl := template.Must(template.New("dir").Funcs(template.FuncMap{
@@ -303,6 +307,7 @@ func (s *Server) serveDirWithBase(w http.ResponseWriter, r *http.Request, basePa
 	if info.IsDir() {
 		s.listDirectoryWithBase(w, r, fullPath, urlPrefix, subPath)
 	} else {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(fullPath)))
 		http.ServeFile(w, r, fullPath)
 	}
@@ -349,6 +354,7 @@ func (s *Server) listDirectoryWithBase(w http.ResponseWriter, r *http.Request, f
 		return files[i].Name < files[j].Name
 	})
 
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	tmpl := template.Must(template.New("dir").Funcs(template.FuncMap{
@@ -392,6 +398,7 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
 	http.ServeFile(w, r, s.sharePath)
 }
@@ -429,6 +436,7 @@ func (s *Server) serveDir(w http.ResponseWriter, r *http.Request) {
 	if info.IsDir() {
 		s.listDirectory(w, r, fullPath, reqPath)
 	} else {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(fullPath)))
 		http.ServeFile(w, r, fullPath)
 	}
@@ -448,6 +456,8 @@ func (s *Server) listDirectory(w http.ResponseWriter, r *http.Request, fullPath,
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Cache-Control", "no-store")
 
 	var files []FileInfo
 	for _, entry := range entries {

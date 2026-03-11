@@ -185,6 +185,28 @@ Download from [Releases](https://github.com/bunnyf/cfshare/releases) and extract
 - cloudflared
 - Domain hosted on Cloudflare
 
+### CDN Cache Optimization (Recommended for China)
+
+cfshare sets `Cache-Control: public, max-age=3600` on file downloads, allowing Cloudflare to cache files at edge nodes. For users in China or other regions far from the origin, you can further optimize via Cloudflare Dashboard:
+
+1. **Enable Tiered Cache** (free)
+   - Dashboard → your domain → Caching → Tiered Cache
+   - Enable "Smart Tiered Cache Topology"
+   - Reduces origin requests by routing through upper-tier data centers
+
+2. **Cache Rules** (optional, for longer cache)
+   - Dashboard → your domain → Caching → Cache Rules → Create Rule
+   - Match: `Hostname equals share.yourdomain.com`
+   - Cache eligibility: "Eligible for cache"
+   - Edge TTL: Override → 1 day (or longer)
+   - Browser TTL: Override → 1 hour
+
+3. **Argo Smart Routing** (paid, ~$5/month)
+   - Dashboard → your domain → Traffic → Argo Smart Routing
+   - Optimizes routing paths, significantly reduces latency for cross-region access
+
+> **Note**: If you update a shared file and want the CDN to serve the new version immediately, stop and restart the share (`cfshare stop && cfshare <path>`), or wait for the cache to expire (default 1 hour).
+
 ### Known Limitations
 
 - Only one active share at a time
@@ -371,7 +393,7 @@ Move-Item cfshare.exe "$env:USERPROFILE\bin\"
 - **默认认证** - HTTP Basic Auth，口令随机生成 16 位
 - **目录穿越防护** - 禁止访问分享目录以外的文件
 - **符号链接限制** - 不跟随指向分享目录外的符号链接
-- **无缓存** - 响应头设置 `Cache-Control: no-store`
+- **CDN 缓存加速** - 文件下载允许 Cloudflare CDN 缓存（`public, max-age=3600`），目录列表不缓存
 - **状态文件权限** - 使用 0600 权限保护敏感信息
 - **常量时间比较** - 防止时序攻击
 
@@ -385,6 +407,28 @@ Move-Item cfshare.exe "$env:USERPROFILE\bin\"
 | 服务器日志 | `~/.cfshare/server.log` |
 | Tunnel 日志 | `~/.cfshare/tunnel.log` |
 | Tunnel 配置 | `~/.cloudflared/config.yml` |
+
+### CDN 缓存优化（推荐中国用户配置）
+
+cfshare 默认为文件下载设置 `Cache-Control: public, max-age=3600`，允许 Cloudflare 在边缘节点缓存文件。对于中国等距离源站较远的用户，建议在 Cloudflare Dashboard 做以下配置：
+
+1. **开启 Tiered Cache**（免费）
+   - Dashboard → 你的域名 → Caching → Tiered Cache
+   - 开启 "Smart Tiered Cache Topology"
+   - 通过上层数据中心减少回源请求，提升缓存命中率
+
+2. **配置 Cache Rules**（可选，延长缓存时间）
+   - Dashboard → 你的域名 → Caching → Cache Rules → 创建规则
+   - 匹配条件: `Hostname equals share.yourdomain.com`
+   - 缓存资格: "Eligible for cache"
+   - Edge TTL: 覆盖 → 1 天（或更长）
+   - Browser TTL: 覆盖 → 1 小时
+
+3. **Argo Smart Routing**（付费，约 $5/月）
+   - Dashboard → 你的域名 → Traffic → Argo Smart Routing
+   - 智能路由优化，显著降低跨区域访问延迟
+
+> **注意**: 如果更新了分享的文件并希望立即生效，请重启分享（`cfshare stop && cfshare <path>`），或等待缓存过期（默认 1 小时）。
 
 ### 故障排除
 
