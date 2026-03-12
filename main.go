@@ -218,7 +218,48 @@ func cmdStatus() {
 		os.Exit(1)
 	}
 
-	fmt.Println(st.FormatStatus())
+	if st == nil || !st.IsRunning() {
+		// 无活动分享或服务未运行，显示静态状态
+		fmt.Println(st.FormatStatus())
+		return
+	}
+
+	// 实时刷新模式
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	// 首次显示
+	clearScreen()
+	fmt.Print(st.FormatLiveStatus())
+
+	for {
+		select {
+		case <-sigChan:
+			fmt.Print("\n\n")
+			return
+		case <-ticker.C:
+			// 重新读取状态（可能有 add/rm 变更）
+			newSt, err := state.Load()
+			if err == nil && newSt != nil {
+				st = newSt
+			}
+			clearScreen()
+			fmt.Print(st.FormatLiveStatus())
+
+			// 如果服务已停止，退出实时模式
+			if !st.IsRunning() {
+				fmt.Println("\n\n服务已停止，退出实时监控")
+				return
+			}
+		}
+	}
+}
+
+func clearScreen() {
+	fmt.Print("\033[H\033[2J")
 }
 
 func cmdStop(force bool) {

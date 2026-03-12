@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestShareItemCreation(t *testing.T) {
@@ -253,6 +254,136 @@ func TestLoadLegacyFormat(t *testing.T) {
 	}
 	if loaded.IsMulti {
 		t.Error("legacy single file should not be multi")
+	}
+}
+
+func TestFormatLiveStatusNil(t *testing.T) {
+	var st *State
+	output := st.FormatLiveStatus()
+	if !containsStr(output, "当前无活动分享") {
+		t.Error("nil state should show no active share message")
+	}
+}
+
+func TestFormatLiveStatusSingleItem(t *testing.T) {
+	st := &State{
+		ShareID:   "test123",
+		Mode:      ModeProtected,
+		PublicURL: "https://share.example.com",
+		Username:  "user",
+		Password:  "pass",
+		Port:      8787,
+		StartTime: time.Now().Add(-1 * time.Hour),
+		Items: []ShareItem{
+			{Path: "/test/file.txt", Name: "file.txt", ShareType: TypeFile, Size: 1048576},
+		},
+		IsMulti: false,
+	}
+
+	output := st.FormatLiveStatus()
+	if !containsStr(output, "实时") {
+		t.Error("live status should contain '实时'")
+	}
+	if !containsStr(output, "运行时间") {
+		t.Error("live status should contain uptime")
+	}
+	if !containsStr(output, "流量统计") {
+		t.Error("live status should contain traffic stats")
+	}
+	if !containsStr(output, "当前速度") {
+		t.Error("live status should contain speed")
+	}
+	if !containsStr(output, "1.00 MB") {
+		t.Error("live status should show file size")
+	}
+}
+
+func TestFormatLiveStatusMultiItems(t *testing.T) {
+	st := &State{
+		ShareID:   "test123",
+		Mode:      ModePublic,
+		PublicURL: "https://share.example.com",
+		Port:      8787,
+		StartTime: time.Now().Add(-30 * time.Minute),
+		Items: []ShareItem{
+			{Path: "/test/file1.txt", Name: "file1.txt", ShareType: TypeFile, Size: 2048},
+			{Path: "/test/dir", Name: "dir", ShareType: TypeDir},
+		},
+		IsMulti: true,
+	}
+
+	output := st.FormatLiveStatus()
+	if !containsStr(output, "2 个项目") {
+		t.Error("live status should show item count")
+	}
+	if !containsStr(output, "file1.txt") {
+		t.Error("live status should show file1.txt")
+	}
+	if !containsStr(output, "dir") {
+		t.Error("live status should show dir")
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{5 * time.Second, "5秒"},
+		{65 * time.Second, "1分 5秒"},
+		{3661 * time.Second, "1时 1分 1秒"},
+		{90061 * time.Second, "1天 1时 1分"},
+	}
+
+	for _, tt := range tests {
+		got := formatDuration(tt.d)
+		if got != tt.want {
+			t.Errorf("formatDuration(%v) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		b    int64
+		want string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1.00 KB"},
+		{1048576, "1.00 MB"},
+		{1073741824, "1.00 GB"},
+	}
+
+	for _, tt := range tests {
+		got := formatBytes(tt.b)
+		if got != tt.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tt.b, got, tt.want)
+		}
+	}
+}
+
+func TestCalculateSpeed(t *testing.T) {
+	now := time.Now()
+
+	// 近 30 秒内有请求
+	records := []AccessRecord{
+		{Time: now.Add(-10 * time.Second), BytesSent: 30000},
+		{Time: now.Add(-5 * time.Second), BytesSent: 30000},
+	}
+
+	speed := calculateSpeed(records)
+	if speed <= 0 {
+		t.Error("speed should be > 0 for recent requests")
+	}
+
+	// 所有请求都超出 30 秒窗口
+	oldRecords := []AccessRecord{
+		{Time: now.Add(-60 * time.Second), BytesSent: 30000},
+	}
+	speed = calculateSpeed(oldRecords)
+	if speed != 0 {
+		t.Errorf("speed should be 0 for old requests, got %d", speed)
 	}
 }
 
