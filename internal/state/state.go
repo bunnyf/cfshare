@@ -33,6 +33,48 @@ type AccessRecord struct {
 	RemoteAddr string    `json:"remote_addr"`
 }
 
+// TransferRecord 记录一次活动文件传输的进度（服务进程写，CLI 进程读）
+type TransferRecord struct {
+	ID         string    `json:"id"`
+	FileName   string    `json:"file_name"`
+	TotalSize  int64     `json:"total_size"`
+	BytesSent  int64     `json:"bytes_sent"`  // 本次连接已传字节
+	RangeStart int64     `json:"range_start"` // 断点续传起始偏移
+	StartTime  time.Time `json:"start_time"`
+	RemoteAddr string    `json:"remote_addr"`
+	Done       bool      `json:"done,omitempty"`
+}
+
+// BytesReceived 返回客户端实际已收到的总字节数（含续传偏移）
+func (r *TransferRecord) BytesReceived() int64 {
+	return r.RangeStart + r.BytesSent
+}
+
+// TransferSnapshot 是 transfers.json 的文件格式
+type TransferSnapshot struct {
+	Transfers []TransferRecord `json:"transfers"`
+	UpdatedAt time.Time        `json:"updated_at"`
+}
+
+// LoadTransferSnapshot 读取传输进度快照，超过 3s 未更新视为失效
+func LoadTransferSnapshot() (*TransferSnapshot, error) {
+	data, err := os.ReadFile(config.GetTransfersPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var s TransferSnapshot
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, err
+	}
+	if time.Since(s.UpdatedAt) > 3*time.Second {
+		return nil, nil
+	}
+	return &s, nil
+}
+
 // ShareItem 表示单个分享项
 type ShareItem struct {
 	Path      string    `json:"path"`       // 绝对路径

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ type Server struct {
 	state   *state.State
 	stateMu sync.Mutex
 	srv     *http.Server
+	tracker *TransferTracker
 }
 
 func NewServer(paths []string, st *state.State) (*Server, error) {
@@ -74,6 +76,8 @@ func NewServer(paths []string, st *state.State) (*Server, error) {
 		return nil, err
 	}
 
+	tracker := newTransferTracker()
+
 	// 单路径: 保持向后兼容
 	if len(items) == 1 {
 		st.Items = items
@@ -88,6 +92,7 @@ func NewServer(paths []string, st *state.State) (*Server, error) {
 			itemMap:   itemMap,
 			isMulti:   false,
 			state:     st,
+			tracker:   tracker,
 		}, nil
 	}
 
@@ -100,6 +105,7 @@ func NewServer(paths []string, st *state.State) (*Server, error) {
 		itemMap: itemMap,
 		isMulti: true,
 		state:   st,
+		tracker: tracker,
 	}, nil
 }
 
@@ -164,21 +170,26 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 // handleMultiShare 处理多文件分享请求
 func (s *Server) handleMultiShare(w http.ResponseWriter, r *http.Request) {
-	reqPath := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
-
 	// 根路径: 显示虚拟目录列表
-	if reqPath == "/" || reqPath == "." || reqPath == "" {
+	rawPath := r.URL.Path
+	if rawPath == "/" || rawPath == "" {
 		s.listVirtualRoot(w, r)
 		return
 	}
 
-	// 解析第一级路径名
-	trimmedPath := strings.TrimPrefix(reqPath, "/")
+	// 从原始路径中提取第一个组件（不做 Clean，防止 .. 跨项访问）
+	trimmedPath := strings.TrimPrefix(rawPath, "/")
 	parts := strings.SplitN(trimmedPath, "/", 2)
 	itemName := parts[0]
 	subPath := ""
 	if len(parts) > 1 {
 		subPath = parts[1]
+	}
+
+	// 第一个组件不能含有 .. 或空（防止 URL 编码绕过由 net/http 已处理）
+	if itemName == ".." || itemName == "." || itemName == "" {
+		http.NotFound(w, r)
+		return
 	}
 
 	// 查找分享项
@@ -195,8 +206,7 @@ func (s *Server) handleMultiShare(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, item.Name))
-		http.ServeFile(w, r, item.Path)
+		s.serveFileContent(w, r, item.Path, item.Name)
 	} else {
 		// 目录: 使用基于项的目录浏览
 		s.serveDirWithBase(w, r, item.Path, "/"+itemName, subPath)
@@ -303,8 +313,7 @@ func (s *Server) serveDirWithBase(w http.ResponseWriter, r *http.Request, basePa
 	if info.IsDir() {
 		s.listDirectoryWithBase(w, r, fullPath, urlPrefix, subPath)
 	} else {
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(fullPath)))
-		http.ServeFile(w, r, fullPath)
+		s.serveFileContent(w, r, fullPath, filepath.Base(fullPath))
 	}
 }
 
@@ -392,8 +401,7 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
-	http.ServeFile(w, r, s.sharePath)
+	s.serveFileContent(w, r, s.sharePath, fileName)
 }
 
 func (s *Server) serveDir(w http.ResponseWriter, r *http.Request) {
@@ -429,8 +437,7 @@ func (s *Server) serveDir(w http.ResponseWriter, r *http.Request) {
 	if info.IsDir() {
 		s.listDirectory(w, r, fullPath, reqPath)
 	} else {
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(fullPath)))
-		http.ServeFile(w, r, fullPath)
+		s.serveFileContent(w, r, fullPath, filepath.Base(fullPath))
 	}
 }
 
@@ -516,6 +523,85 @@ func formatSize(size int64) string {
 	}
 }
 
+// serveFileContent 使用 http.ServeContent 提供文件下载，原生支持 HTTP Range（断点续传），
+// 并通过 progressWriter 实时跟踪传输进度。
+func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, filePath, fileName string) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+		} else {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	rangeStart := parseRangeStart(r.Header.Get("Range"), info.Size())
+	id := s.tracker.Start(fileName, info.Size(), rangeStart, r.RemoteAddr)
+	defer s.tracker.Finish(id)
+
+	pw := &progressWriter{
+		ResponseWriter: w,
+		tracker:        s.tracker,
+		id:             id,
+	}
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
+	http.ServeContent(pw, r, fileName, info.ModTime(), f)
+}
+
+// parseRangeStart 从 Range 请求头中提取起始字节偏移，用于断点续传进度计算
+func parseRangeStart(rangeHeader string, fileSize int64) int64 {
+	if !strings.HasPrefix(rangeHeader, "bytes=") {
+		return 0
+	}
+	s := strings.TrimPrefix(rangeHeader, "bytes=")
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		// suffix range: bytes=-N (末尾 N 字节)
+		if len(parts) == 2 {
+			n, err := strconv.ParseInt(parts[1], 10, 64)
+			if err == nil && n > 0 {
+				return fileSize - n
+			}
+		}
+		return 0
+	}
+	n, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// progressWriter 包装 ResponseWriter，在每次 Write 时通知 TransferTracker 更新进度
+type progressWriter struct {
+	http.ResponseWriter
+	tracker *TransferTracker
+	id      string
+}
+
+func (pw *progressWriter) Write(b []byte) (int, error) {
+	n, err := pw.ResponseWriter.Write(b)
+	if n > 0 {
+		pw.tracker.Add(pw.id, int64(n))
+	}
+	return n, err
+}
+
+func (pw *progressWriter) Flush() {
+	if f, ok := pw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode int
@@ -531,6 +617,12 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	n, err := rw.ResponseWriter.Write(b)
 	rw.bytes += int64(n)
 	return n, err
+}
+
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {

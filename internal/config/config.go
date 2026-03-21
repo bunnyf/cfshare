@@ -45,3 +45,7 @@ func EnsureConfigDir() error {
 func GetStatsPath() string {
 	return filepath.Join(GetConfigDir(), "stats.json")
 }
+
+func GetTransfersPath() string {
+	return filepath.Join(GetConfigDir(), "transfers.json")
+}

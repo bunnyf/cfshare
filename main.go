@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"cfshare/internal/auth"
@@ -111,6 +112,9 @@ func main() {
 			os.Exit(1)
 		}
 		cmdRemove(args[1:])
+
+	case args[0] == "watch":
+		cmdWatch()
 
 	default:
 		cmdShare(args, publicMode, password, port, tunnelName, publicURL)
@@ -584,6 +588,7 @@ func cmdShare(paths []string, public bool, password string, port int, tunnelName
 	}
 
 	fmt.Print(st.FormatShareOutput())
+	runWatchLoop(st)
 }
 
 func startServerProcess(paths []string, port int, username, password string) (int, error) {
@@ -702,4 +707,193 @@ func reorderArgs() {
 	newArgs = append(newArgs, flags...)
 	newArgs = append(newArgs, positional...)
 	os.Args = newArgs
+}
+
+// cmdWatch 独立监控命令：实时显示当前分享的传输进度
+func cmdWatch() {
+	st, err := state.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "错误: 读取状态失败: %v\n", err)
+		os.Exit(1)
+	}
+	if st == nil || !st.IsRunning() {
+		fmt.Fprintln(os.Stderr, "当前无活动分享")
+		os.Exit(1)
+	}
+	runWatchLoop(st)
+}
+
+// runWatchLoop 持续刷新终端，展示活动传输进度。Ctrl+C 退出，分享继续运行。
+func runWatchLoop(st *state.State) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	speeds := make(map[string]*watchSpeed)
+	prevLines := 0
+
+	// 首帧立即渲染
+	snap, _ := state.LoadTransferSnapshot()
+	prevLines = renderWatchFrame(st, snap, speeds, prevLines)
+
+	for {
+		select {
+		case <-sigChan:
+			// 在现有帧下方打印退出提示
+			fmt.Println("\n已退出监控（分享继续在后台运行）")
+			return
+		case <-ticker.C:
+			snap, _ = state.LoadTransferSnapshot()
+			prevLines = renderWatchFrame(st, snap, speeds, prevLines)
+		}
+	}
+}
+
+type watchSpeed struct {
+	prevBytes int64
+	prevTime  time.Time
+	bps       float64 // bytes per second
+}
+
+func renderWatchFrame(st *state.State, snap *state.TransferSnapshot, speeds map[string]*watchSpeed, prevLines int) int {
+	now := time.Now()
+	requestCount, _, _ := state.LoadStats()
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("cfshare 分享监控    %s", now.Format("15:04:05")))
+	lines = append(lines, "─────────────────────────────────────────")
+
+	if st.PublicURL != "" {
+		lines = append(lines, "URL: "+st.PublicURL)
+	}
+
+	serviceStatus := "🟢 运行中"
+	if !st.IsRunning() {
+		serviceStatus = "🔴 已停止"
+	}
+	lines = append(lines, fmt.Sprintf("状态: %s  |  累计访问: %d 次", serviceStatus, requestCount))
+	lines = append(lines, "")
+
+	// 收集活动传输
+	var active []state.TransferRecord
+	if snap != nil {
+		for _, t := range snap.Transfers {
+			if !t.Done {
+				active = append(active, t)
+			}
+		}
+	}
+
+	if len(active) > 0 {
+		lines = append(lines, fmt.Sprintf("活动传输 (%d):", len(active)))
+		for _, t := range active {
+			// 更新速度
+			ts, ok := speeds[t.ID]
+			if !ok {
+				ts = &watchSpeed{prevBytes: t.BytesReceived(), prevTime: now}
+				speeds[t.ID] = ts
+			} else {
+				elapsed := now.Sub(ts.prevTime).Seconds()
+				if elapsed >= 0.4 {
+					delta := t.BytesReceived() - ts.prevBytes
+					if delta >= 0 {
+						ts.bps = float64(delta) / elapsed
+					}
+					ts.prevBytes = t.BytesReceived()
+					ts.prevTime = now
+				}
+			}
+
+			received := t.BytesReceived()
+			pct := 0.0
+			if t.TotalSize > 0 {
+				pct = float64(received) / float64(t.TotalSize) * 100
+				if pct > 100 {
+					pct = 100
+				}
+			}
+
+			bar := watchProgressBar(pct, 20)
+			name := t.FileName
+			if len([]rune(name)) > 20 {
+				name = string([]rune(name)[:17]) + "..."
+			}
+
+			addr := t.RemoteAddr
+			if i := strings.LastIndex(addr, ":"); i >= 0 {
+				addr = addr[:i]
+			}
+
+			lines = append(lines, fmt.Sprintf("  %-20s [%s] %5.1f%%  %s / %s  %-10s  %s",
+				name, bar, pct,
+				watchFormatBytes(received),
+				watchFormatBytes(t.TotalSize),
+				watchFormatSpeed(ts.bps),
+				addr,
+			))
+		}
+	} else {
+		lines = append(lines, "等待下载...")
+	}
+
+	// 清理已完成传输的速度缓存
+	if snap != nil {
+		active := make(map[string]bool)
+		for _, t := range snap.Transfers {
+			active[t.ID] = true
+		}
+		for id := range speeds {
+			if !active[id] {
+				delete(speeds, id)
+			}
+		}
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, "按 Ctrl+C 退出监控（分享继续在后台运行）")
+
+	// 上移覆盖上一帧
+	if prevLines > 0 {
+		fmt.Printf("\033[%dA", prevLines)
+	}
+	for _, line := range lines {
+		fmt.Printf("\r\033[K%s\n", line)
+	}
+
+	return len(lines)
+}
+
+func watchProgressBar(pct float64, width int) string {
+	filled := int(pct * float64(width) / 100)
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
+func watchFormatBytes(n int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+	switch {
+	case n >= GB:
+		return fmt.Sprintf("%.2fGB", float64(n)/GB)
+	case n >= MB:
+		return fmt.Sprintf("%.1fMB", float64(n)/MB)
+	case n >= KB:
+		return fmt.Sprintf("%.1fKB", float64(n)/KB)
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
+}
+
+func watchFormatSpeed(bps float64) string {
+	if bps <= 0 {
+		return "-- B/s"
+	}
+	return watchFormatBytes(int64(bps)) + "/s"
 }

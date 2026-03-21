@@ -246,6 +246,65 @@ func TestSingleFileModeBackwardCompatibility(t *testing.T) {
 	}
 }
 
+// TestRangeRequestSingleFile 验证单文件模式下 HTTP Range 断点续传
+func TestRangeRequestSingleFile(t *testing.T) {
+	tmpFile, _ := os.CreateTemp("", "range_test*.bin")
+	defer os.Remove(tmpFile.Name())
+
+	content := []byte("0123456789abcdef") // 16 bytes
+	tmpFile.Write(content)
+	tmpFile.Close()
+
+	st := &state.State{}
+	srv, _ := NewServer([]string{tmpFile.Name()}, st)
+
+	// 请求后半段 bytes=8-
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Range", "bytes=8-")
+	w := httptest.NewRecorder()
+	srv.handleRequest(w, req)
+
+	if w.Code != http.StatusPartialContent {
+		t.Errorf("Range request: expected 206, got %d", w.Code)
+	}
+	if w.Body.String() != "89abcdef" {
+		t.Errorf("Range body: expected '89abcdef', got %q", w.Body.String())
+	}
+	if w.Header().Get("Accept-Ranges") != "bytes" {
+		t.Error("Accept-Ranges: bytes header missing")
+	}
+}
+
+// TestRangeRequestMultiFile 验证多文件模式下 HTTP Range 断点续传
+func TestRangeRequestMultiFile(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "range_multi_test")
+	defer os.RemoveAll(tmpDir)
+
+	filePath := tmpDir + "/data.bin"
+	content := []byte("ABCDEFGHIJ") // 10 bytes
+	os.WriteFile(filePath, content, 0644)
+
+	st := &state.State{}
+	srv, _ := NewServer([]string{filePath}, st)
+	srv.isMulti = true
+	name := "data.bin"
+	srv.itemMap = map[string]*state.ShareItem{
+		name: &srv.items[0],
+	}
+
+	req := httptest.NewRequest("GET", "/data.bin", nil)
+	req.Header.Set("Range", "bytes=5-9")
+	w := httptest.NewRecorder()
+	srv.handleRequest(w, req)
+
+	if w.Code != http.StatusPartialContent {
+		t.Errorf("Range request multi: expected 206, got %d", w.Code)
+	}
+	if w.Body.String() != "FGHIJ" {
+		t.Errorf("Range body: expected 'FGHIJ', got %q", w.Body.String())
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }
