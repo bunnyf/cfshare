@@ -14,7 +14,7 @@ Share local files or directories via Cloudflare Tunnel with a single command. Ge
 
 ### Features
 
-- **One-Command Sharing** - Share files or directories with a single command
+- **One-Command Sharing** - Share single file, multiple files, or directories with a single command
 - **Cross-Platform** - Supports macOS, Linux, and Windows
 - **Secure by Default** - Auto-generated access password (Basic Auth)
 - **Global CDN** - Accelerated access via Cloudflare's edge network
@@ -59,10 +59,17 @@ Share local files or directories via Cloudflare Tunnel with a single command. Ge
 ### Quick Start
 
 ```bash
-# Share a file (auto-generated password)
+# Share a single file
 cfshare ~/Documents/report.pdf
 
-# Output:
+# Share multiple files
+cfshare ~/file1.pdf ~/file2.zip ~/photo.jpg
+
+# Share a directory
+cfshare ~/Documents/project
+
+# Example output (auto-generated password)
+
 # ✅ Share started
 # URL:      https://share.yourdomain.com
 # Path:     /Users/you/Documents/report.pdf
@@ -202,7 +209,7 @@ GPL-3.0
 
 ### 特性
 
-- **一键分享** - 单命令分享文件或目录
+- **一键分享** - 单命令分享单个文件、多个文件或目录
 - **跨平台** - 支持 macOS、Linux 和 Windows
 - **默认安全** - 自动生成访问口令（Basic Auth）
 - **全球加速** - 通过 Cloudflare 边缘网络提供访问
@@ -247,10 +254,17 @@ GPL-3.0
 ### 快速开始
 
 ```bash
-# 分享文件（自动生成口令）
+# 分享单个文件
 cfshare ~/Documents/report.pdf
 
-# 输出示例：
+# 分享多个文件
+cfshare ~/file1.pdf ~/file2.zip ~/photo.jpg
+
+# 分享目录
+cfshare ~/Documents/project
+
+# 输出示例（自动生成口令）
+
 # ✅ 分享已启动
 # URL:      https://share.yourdomain.com
 # Path:     /Users/you/Documents/report.pdf
